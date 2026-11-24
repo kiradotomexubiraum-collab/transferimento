@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Transferência Direta P2P</title>
   <script src="https://unpkg.com"></script>
+  <script src="https://cloudflare.com"></script>
   <style>
     body {
       font-family: system-ui, -apple-system, sans-serif;
@@ -22,7 +23,7 @@
       padding: 2rem;
       border-radius: 12px;
       box-shadow: 0 10px 25px rgba(0,0,0,0.4);
-      max-width: 440px;
+      max-width: 460px;
       width: 100%;
       text-align: center;
     }
@@ -31,17 +32,38 @@
     input[type="file"] {
       display: block;
       width: 100%;
-      margin: 1.5rem 0;
-      padding: 10px;
+      margin: 1.5rem 0 0.8rem 0;
+      padding: 12px;
       background: #0f172a;
       border: 1px dashed #475569;
       border-radius: 8px;
       color: #cbd5e1;
       box-sizing: border-box;
+      cursor: pointer;
     }
+    .file-list {
+      text-align: left;
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 1.2rem;
+      max-height: 130px;
+      overflow-y: auto;
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      display: none;
+    }
+    .file-list div {
+      padding: 4px 0;
+      border-bottom: 1px solid #1e293b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-list div:last-child { border-bottom: none; }
     .link-box {
       display: none;
-      margin-top: 1.5rem;
+      margin-top: 1.2rem;
       text-align: left;
     }
     input[type="text"] {
@@ -88,10 +110,11 @@
 <div class="card">
   <!-- TELA DE ENVIO -->
   <div id="sender-ui">
-    <h1>Enviar Arquivo Direto</h1>
-    <p>Escolha um arquivo para gerar um link. Mantenha esta aba aberta até o download concluir.</p>
+    <h1>Enviar Arquivos Direto</h1>
+    <p>Selecione um ou vários arquivos. Mantenha esta aba aberta até o download concluir.</p>
     
-    <input type="file" id="file-input">
+    <input type="file" id="file-input" multiple>
+    <div class="file-list" id="file-list"></div>
     
     <div class="link-box" id="link-box">
       <label style="font-size: 0.8rem; color: #94a3b8;">Envie este link para quem vai baixar:</label>
@@ -102,7 +125,7 @@
 
   <!-- TELA DE RECEBIMENTO -->
   <div id="receiver-ui" style="display: none;">
-    <h1>Baixar Arquivo</h1>
+    <h1>Baixar Arquivos</h1>
     <p id="file-info">Conectando ao remetente...</p>
     <button id="download-btn" style="display: none;">Iniciar Download</button>
   </div>
@@ -114,12 +137,12 @@
 <script>
   const urlParams = new URLSearchParams(window.location.search);
   const hostId = urlParams.get('id');
-  const CHUNK_SIZE = 65536; // 64KB por pacote para não travar o navegador
+  const CHUNK_SIZE = 65536; // 64KB por pacote
 
   const statusText = document.getElementById('status-text');
   const progressBar = document.getElementById('progress-bar');
 
-  // MODO RECEPTOR (Quem abriu o link com ?id=...)
+  // MODO RECEPTOR
   if (hostId) {
     document.getElementById('sender-ui').style.display = 'none';
     document.getElementById('receiver-ui').style.display = 'block';
@@ -133,7 +156,7 @@
       const conn = peer.connect(hostId, { reliable: true });
 
       conn.on('open', () => {
-        document.getElementById('file-info').textContent = 'Conectado! Aguardando dados...';
+        document.getElementById('file-info').textContent = 'Conectado! Aguardando informações...';
         conn.send({ type: 'ready' });
       });
 
@@ -141,14 +164,14 @@
         if (data.type === 'meta') {
           fileMeta = data;
           const sizeMB = (fileMeta.size / (1024 * 1024)).toFixed(2);
-          document.getElementById('file-info').textContent = `Arquivo: ${fileMeta.name} (${sizeMB} MB)`;
+          document.getElementById('file-info').textContent = `Pronto para baixar: ${fileMeta.name} (${sizeMB} MB)`;
           
           const dlBtn = document.getElementById('download-btn');
           dlBtn.style.display = 'block';
           dlBtn.onclick = () => {
             dlBtn.disabled = true;
             progressBar.style.display = 'block';
-            statusText.textContent = 'Recebendo arquivo...';
+            statusText.textContent = 'Recebendo dados...';
             conn.send({ type: 'start' });
           };
         } else if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
@@ -160,7 +183,7 @@
           statusText.textContent = `Baixando: ${percent}%`;
 
           if (receivedSize >= fileMeta.size) {
-            statusText.textContent = 'Montando arquivo para salvar...';
+            statusText.textContent = 'Salvando arquivo no dispositivo...';
             const blob = new Blob(receivedChunks, { type: fileMeta.mime });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -178,10 +201,12 @@
       });
     });
 
-  // MODO REMETENTE (Quem abriu o site normal para enviar)
+  // MODO REMETENTE
   } else {
     const peer = new Peer();
-    let selectedFile = null;
+    let payloadToSend = null; // Pode ser um File único ou um Blob (.zip)
+    let payloadName = '';
+    let payloadMime = '';
 
     peer.on('open', (id) => {
       const baseUrl = window.location.href.split('?')[0];
@@ -189,11 +214,58 @@
       document.getElementById('share-link').value = fullLink;
     });
 
-    document.getElementById('file-input').addEventListener('change', (e) => {
-      selectedFile = e.target.files[0];
-      if (selectedFile) {
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      if (files.length === 0) return;
+
+      const fileListEl = document.getElementById('file-list');
+      fileListEl.innerHTML = '';
+      fileListEl.style.display = 'block';
+      document.getElementById('link-box').style.display = 'none';
+
+      files.forEach(f => {
+        const item = document.createElement('div');
+        const sizeMB = (f.size / (1024 * 1024)).toFixed(1);
+        item.textContent = `📄 ${f.name} (${sizeMB} MB)`;
+        fileListEl.appendChild(item);
+      });
+
+      if (files.length === 1) {
+        // Envia direto sem compactar se for apenas 1 arquivo
+        payloadToSend = files[0];
+        payloadName = files[0].name;
+        payloadMime = files[0].type || 'application/octet-stream';
+        
         document.getElementById('link-box').style.display = 'block';
-        statusText.textContent = 'Arquivo pronto. Aguardando alguém abrir o link...';
+        statusText.textContent = 'Arquivo pronto! Copie o link abaixo.';
+      } else {
+        // Compacta vários arquivos em um .zip automaticamente
+        statusText.textContent = `Empacotando ${files.length} arquivos em um .zip...`;
+        progressBar.style.display = 'block';
+        progressBar.value = 0;
+
+        const zip = new JSZip();
+        files.forEach(file => {
+          zip.file(file.name, file);
+        });
+
+        // STORE = sem compressão pesada (muito mais rápido e não trava a RAM em arquivos grandes)
+        const zipBlob = await zip.generateAsync(
+          { type: 'blob', compression: 'STORE' },
+          (metadata) => {
+            const percent = Math.round(metadata.percent);
+            progressBar.value = percent;
+            statusText.textContent = `Preparando pacote: ${percent}%`;
+          }
+        );
+
+        payloadToSend = zipBlob;
+        payloadName = `arquivos_${files.length}_itens.zip`;
+        payloadMime = 'application/zip';
+
+        progressBar.style.display = 'none';
+        document.getElementById('link-box').style.display = 'block';
+        statusText.textContent = 'Pacote pronto! Aguardando alguém abrir o link...';
       }
     });
 
@@ -206,22 +278,23 @@
 
     peer.on('connection', (conn) => {
       conn.on('data', (data) => {
-        if (data.type === 'ready' && selectedFile) {
+        if (data.type === 'ready' && payloadToSend) {
           statusText.textContent = 'Destinatário conectado! Aguardando ele clicar em baixar...';
           conn.send({
             type: 'meta',
-            name: selectedFile.name,
-            size: selectedFile.size,
-            mime: selectedFile.type
+            name: payloadName,
+            size: payloadToSend.size,
+            mime: payloadMime
           });
-        } else if (data.type === 'start' && selectedFile) {
+        } else if (data.type === 'start' && payloadToSend) {
           progressBar.style.display = 'block';
-          sendFileInChunks(conn, selectedFile);
+          progressBar.value = 0;
+          sendBlobInChunks(conn, payloadToSend);
         }
       });
     });
 
-    function sendFileInChunks(conn, file) {
+    function sendBlobInChunks(conn, blob) {
       let offset = 0;
       const reader = new FileReader();
 
@@ -229,12 +302,11 @@
         conn.send(e.target.result);
         offset += e.target.result.byteLength;
 
-        const percent = Math.round((offset / file.size) * 100);
+        const percent = Math.round((offset / blob.size) * 100);
         progressBar.value = percent;
         statusText.textContent = `Enviando: ${percent}%`;
 
-        if (offset < file.size) {
-          // Pequena pausa se o buffer estiver cheio para evitar queda
+        if (offset < blob.size) {
           if (conn.dataChannel.bufferedAmount > 1024 * 1024) {
             setTimeout(() => readNextSlice(offset), 50);
           } else {
@@ -244,15 +316,10 @@
           statusText.textContent = 'Envio concluído com sucesso!';
         }
       };
-
-      function readNextSlice(currentOffset) {
-        const slice = file.slice(currentOffset, currentOffset + CHUNK_SIZE);
-        reader.readAsArrayBuffer(slice);
-      }
-
-      readNextSlice(0);
-    }
+    function readNextSlice(currentOffset) {
+    const slice = blob.slice(currentOffset, currentOffset + CHUNK_SIZE);
+    reader.readAsArrayBuffer(slice);
   }
-</script>
-</body>
-</html>
+  readNextSlice(0);
+}
+}
