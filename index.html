@@ -204,7 +204,7 @@
   // MODO REMETENTE
   } else {
     const peer = new Peer();
-    let payloadToSend = null; // Pode ser um File único ou um Blob (.zip)
+    let payloadToSend = null;
     let payloadName = '';
     let payloadMime = '';
 
@@ -231,7 +231,6 @@
       });
 
       if (files.length === 1) {
-        // Envia direto sem compactar se for apenas 1 arquivo
         payloadToSend = files[0];
         payloadName = files[0].name;
         payloadMime = files[0].type || 'application/octet-stream';
@@ -239,7 +238,6 @@
         document.getElementById('link-box').style.display = 'block';
         statusText.textContent = 'Arquivo pronto! Copie o link abaixo.';
       } else {
-        // Compacta vários arquivos em um .zip automaticamente
         statusText.textContent = `Empacotando ${files.length} arquivos em um .zip...`;
         progressBar.style.display = 'block';
         progressBar.value = 0;
@@ -249,7 +247,6 @@
           zip.file(file.name, file);
         });
 
-        // STORE = sem compressão pesada (muito mais rápido e não trava a RAM em arquivos grandes)
         const zipBlob = await zip.generateAsync(
           { type: 'blob', compression: 'STORE' },
           (metadata) => {
@@ -316,10 +313,15 @@
           statusText.textContent = 'Envio concluído com sucesso!';
         }
       };
-    function readNextSlice(currentOffset) {
-    const slice = blob.slice(currentOffset, currentOffset + CHUNK_SIZE);
-    reader.readAsArrayBuffer(slice);
+
+      function readNextSlice(currentOffset) {
+        const slice = blob.slice(currentOffset, currentOffset + CHUNK_SIZE);
+        reader.readAsArrayBuffer(slice);
+      }
+
+      readNextSlice(0);
+    }
   }
-  readNextSlice(0);
-}
-}
+</script>
+</body>
+</html>
