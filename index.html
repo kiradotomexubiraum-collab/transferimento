@@ -4,9 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Transferência Direta P2P</title>
-  <script src="https://unpkg.com"></script>
-  <script src="https://cloudflare.com"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
+    * { box-sizing: border-box; }
     body {
       font-family: system-ui, -apple-system, sans-serif;
       background: #0f172a;
@@ -21,26 +22,62 @@
     .card {
       background: #1e293b;
       padding: 2rem;
-      border-radius: 12px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
-      max-width: 460px;
+      border-radius: 14px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+      max-width: 480px;
       width: 100%;
       text-align: center;
     }
-    h1 { font-size: 1.4rem; margin-top: 0; }
-    p { color: #94a3b8; font-size: 0.95rem; }
-    input[type="file"] {
-      display: block;
-      width: 100%;
-      margin: 1.5rem 0 0.8rem 0;
-      padding: 12px;
+    h1 { font-size: 1.45rem; margin: 0 0 0.5rem 0; }
+    p { color: #94a3b8; font-size: 0.92rem; margin-top: 0; line-height: 1.45; }
+    
+    /* Área de Arrastar e Soltar */
+    .drop-zone {
+      border: 2px dashed #475569;
       background: #0f172a;
-      border: 1px dashed #475569;
-      border-radius: 8px;
-      color: #cbd5e1;
-      box-sizing: border-box;
+      border-radius: 12px;
+      padding: 2rem 1rem;
+      margin: 1.2rem 0;
       cursor: pointer;
+      transition: all 0.2s ease;
     }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #38bdf8;
+      background: #162238;
+    }
+    .drop-zone-icon {
+      font-size: 2.2rem;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+    .drop-zone-text {
+      font-weight: 600;
+      color: #e2e8f0;
+      font-size: 0.98rem;
+    }
+    .drop-zone-sub {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-top: 0.3rem;
+    }
+    .picker-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: #f1f5f9;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      flex: 1;
+      font-weight: 500;
+    }
+    .btn-secondary:hover { background: #475569; }
+
     .file-list {
       text-align: left;
       background: #0f172a;
@@ -49,7 +86,7 @@
       margin-bottom: 1.2rem;
       max-height: 130px;
       overflow-y: auto;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: #cbd5e1;
       display: none;
     }
@@ -61,45 +98,73 @@
       text-overflow: ellipsis;
     }
     .file-list div:last-child { border-bottom: none; }
+
+    /* Caixa de Link e Compartilhamento */
     .link-box {
       display: none;
       margin-top: 1.2rem;
       text-align: left;
+      background: #0f172a;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+    }
+    .link-box label {
+      display: block;
+      font-size: 0.82rem;
+      color: #94a3b8;
+      margin-bottom: 6px;
     }
     input[type="text"] {
       width: 100%;
       padding: 10px;
       border-radius: 6px;
       border: 1px solid #334155;
-      background: #0f172a;
+      background: #1e293b;
       color: #38bdf8;
       font-size: 0.85rem;
-      box-sizing: border-box;
       margin-bottom: 10px;
     }
-    button {
+    .share-actions {
+      display: flex;
+      gap: 8px;
+    }
+    button.primary {
       background: #3b82f6;
       color: white;
       border: none;
-      padding: 12px 18px;
+      padding: 11px 14px;
       border-radius: 8px;
       font-weight: 600;
       cursor: pointer;
-      width: 100%;
-      font-size: 1rem;
+      flex: 1;
+      font-size: 0.92rem;
     }
-    button:hover { background: #2563eb; }
+    button.primary:hover { background: #2563eb; }
+    button.whatsapp {
+      background: #16a34a;
+      color: white;
+      border: none;
+      padding: 11px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      flex: 1;
+      font-size: 0.92rem;
+    }
+    button.whatsapp:hover { background: #15803d; }
     button:disabled { background: #475569; cursor: not-allowed; }
+
     progress {
       width: 100%;
-      height: 14px;
+      height: 12px;
       margin-top: 1rem;
       display: none;
-      border-radius: 7px;
+      border-radius: 6px;
     }
     .status {
-      margin-top: 1rem;
-      font-size: 0.9rem;
+      margin-top: 0.9rem;
+      font-size: 0.88rem;
       color: #38bdf8;
       font-weight: 500;
     }
@@ -110,16 +175,32 @@
 <div class="card">
   <!-- TELA DE ENVIO -->
   <div id="sender-ui">
-    <h1>Enviar Arquivos Direto</h1>
-    <p>Selecione um ou vários arquivos. Mantenha esta aba aberta até o download concluir.</p>
+    <h1>Enviar Pastas ou Arquivos</h1>
+    <p>Arraste pastas ou arquivos para o quadro abaixo. Mantenha esta aba aberta até quem for baixar concluir.</p>
     
-    <input type="file" id="file-input" multiple>
+    <div class="drop-zone" id="drop-zone">
+      <span class="drop-zone-icon">📁</span>
+      <div class="drop-zone-text">Arraste e solte pastas ou arquivos aqui</div>
+      <div class="drop-zone-sub">Suporta subpastas completas e múltiplos itens</div>
+      <div class="picker-buttons">
+        <button type="button" class="btn-secondary" id="btn-files">Escolher Arquivos</button>
+        <button type="button" class="btn-secondary" id="btn-folder">Escolher Pasta</button>
+      </div>
+    </div>
+
+    <input type="file" id="file-input" multiple style="display: none;">
+    <input type="file" id="folder-input" webkitdirectory directory multiple style="display: none;">
+    
     <div class="file-list" id="file-list"></div>
     
     <div class="link-box" id="link-box">
-      <label style="font-size: 0.8rem; color: #94a3b8;">Envie este link para quem vai baixar:</label>
+      <label>Envie este link para quem vai baixar:</label>
       <input type="text" id="share-link" readonly>
-      <button id="copy-btn">Copiar Link</button>
+      <div class="share-actions">
+        <button type="button" class="primary" id="copy-btn">Copiar Link</button>
+        <button type="button" class="whatsapp" id="wa-btn">WhatsApp</button>
+        <button type="button" class="btn-secondary" id="native-share-btn" style="display: none; flex: 0.7;">Enviar...</button>
+      </div>
     </div>
   </div>
 
@@ -127,7 +208,7 @@
   <div id="receiver-ui" style="display: none;">
     <h1>Baixar Arquivos</h1>
     <p id="file-info">Conectando ao remetente...</p>
-    <button id="download-btn" style="display: none;">Iniciar Download</button>
+    <button type="button" class="primary" id="download-btn" style="display: none; width: 100%;">Iniciar Download</button>
   </div>
 
   <progress id="progress-bar" value="0" max="100"></progress>
@@ -142,7 +223,7 @@
   const statusText = document.getElementById('status-text');
   const progressBar = document.getElementById('progress-bar');
 
-  // MODO RECEPTOR
+  // ================= MODO RECEPTOR =================
   if (hostId) {
     document.getElementById('sender-ui').style.display = 'none';
     document.getElementById('receiver-ui').style.display = 'block';
@@ -156,7 +237,7 @@
       const conn = peer.connect(hostId, { reliable: true });
 
       conn.on('open', () => {
-        document.getElementById('file-info').textContent = 'Conectado! Aguardando informações...';
+        document.getElementById('file-info').textContent = 'Conectado! Aguardando dados...';
         conn.send({ type: 'ready' });
       });
 
@@ -201,50 +282,137 @@
       });
     });
 
-  // MODO REMETENTE
+  // ================= MODO REMETENTE =================
   } else {
     const peer = new Peer();
     let payloadToSend = null;
     let payloadName = '';
     let payloadMime = '';
+    let currentShareUrl = '';
 
     peer.on('open', (id) => {
       const baseUrl = window.location.href.split('?')[0];
-      const fullLink = `${baseUrl}?id=${id}`;
-      document.getElementById('share-link').value = fullLink;
+      currentShareUrl = `${baseUrl}?id=${id}`;
+      document.getElementById('share-link').value = currentShareUrl;
     });
 
-    document.getElementById('file-input').addEventListener('change', async (e) => {
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const folderInput = document.getElementById('folder-input');
+
+    document.getElementById('btn-files').addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.click();
+    });
+    document.getElementById('btn-folder').addEventListener('click', (e) => {
+      e.stopPropagation();
+      folderInput.click();
+    });
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    // Eventos de Arrastar e Soltar (Drag & Drop)
+    ['dragenter', 'dragover'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+      });
+    });
+
+    dropZone.addEventListener('drop', async (e) => {
+      const items = e.dataTransfer.items;
+      if (!items) return;
+
+      statusText.textContent = 'Lendo pastas e arquivos...';
+      const collectedFiles = [];
+
+      // Função recursiva para ler pastas e subpastas
+      async function traverseEntry(entry, path = '') {
+        if (entry.isFile) {
+          const file = await new Promise((resolve) => entry.file(resolve));
+          collectedFiles.push({ file, relativePath: path + file.name });
+        } else if (entry.isDirectory) {
+          const dirReader = entry.createReader();
+          const entries = await new Promise((resolve) => {
+            const allEntries = [];
+            function readBatch() {
+              dirReader.readEntries((batch) => {
+                if (batch.length === 0) resolve(allEntries);
+                else {
+                  allEntries.push(...batch);
+                  readBatch();
+                }
+              });
+            }
+            readBatch();
+          });
+          for (const child of entries) {
+            await traverseEntry(child, path + entry.name + '/');
+          }
+        }
+      }
+
+      const promises = [];
+      for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry();
+        if (entry) promises.push(traverseEntry(entry));
+      }
+      await Promise.all(promises);
+
+      if (collectedFiles.length > 0) {
+        processCollectedItems(collectedFiles);
+      }
+    });
+
+    // Seleção via botões
+    function handleInputSelect(e) {
       const files = Array.from(e.target.files);
       if (files.length === 0) return;
+      const mapped = files.map(f => ({
+        file: f,
+        relativePath: f.webkitRelativePath || f.name
+      }));
+      processCollectedItems(mapped);
+    }
+    fileInput.addEventListener('change', handleInputSelect);
+    folderInput.addEventListener('change', handleInputSelect);
 
+    // Processamento e empacotamento
+    async function processCollectedItems(items) {
       const fileListEl = document.getElementById('file-list');
       fileListEl.innerHTML = '';
       fileListEl.style.display = 'block';
       document.getElementById('link-box').style.display = 'none';
 
-      files.forEach(f => {
-        const item = document.createElement('div');
-        const sizeMB = (f.size / (1024 * 1024)).toFixed(1);
-        item.textContent = `📄 ${f.name} (${sizeMB} MB)`;
-        fileListEl.appendChild(item);
+      items.forEach(item => {
+        const div = document.createElement('div');
+        const sizeMB = (item.file.size / (1024 * 1024)).toFixed(1);
+        div.textContent = `📄 ${item.relativePath} (${sizeMB} MB)`;
+        fileListEl.appendChild(div);
       });
 
-      if (files.length === 1) {
-        payloadToSend = files[0];
-        payloadName = files[0].name;
-        payloadMime = files[0].type || 'application/octet-stream';
-        
+      // Se for apenas 1 arquivo solto (sem pasta), manda direto sem zipar
+      if (items.length === 1 && !items[0].relativePath.includes('/')) {
+        payloadToSend = items[0].file;
+        payloadName = items[0].file.name;
+        payloadMime = items[0].file.type || 'application/octet-stream';
+
         document.getElementById('link-box').style.display = 'block';
-        statusText.textContent = 'Arquivo pronto! Copie o link abaixo.';
+        statusText.textContent = 'Arquivo pronto! Envie o link abaixo para quem vai baixar.';
       } else {
-        statusText.textContent = `Empacotando ${files.length} arquivos em um .zip...`;
+        // Cria um .zip mantendo a estrutura exata das pastas
+        statusText.textContent = `Empacotando ${items.length} arquivos...`;
         progressBar.style.display = 'block';
         progressBar.value = 0;
 
         const zip = new JSZip();
-        files.forEach(file => {
-          zip.file(file.name, file);
+        items.forEach(item => {
+          zip.file(item.relativePath, item.file);
         });
 
         const zipBlob = await zip.generateAsync(
@@ -256,23 +424,46 @@
           }
         );
 
+        const firstFolder = items[0].relativePath.includes('/')
+          ? items[0].relativePath.split('/')[0]
+          : `pacote_${items.length}_arquivos`;
+
         payloadToSend = zipBlob;
-        payloadName = `arquivos_${files.length}_itens.zip`;
+        payloadName = `${firstFolder}.zip`;
         payloadMime = 'application/zip';
 
         progressBar.style.display = 'none';
         document.getElementById('link-box').style.display = 'block';
-        statusText.textContent = 'Pacote pronto! Aguardando alguém abrir o link...';
+        statusText.textContent = 'Pacote pronto! Envie o link abaixo.';
       }
-    });
+    }
 
+    // Botões de Compartilhamento
     document.getElementById('copy-btn').addEventListener('click', () => {
       const linkInput = document.getElementById('share-link');
       linkInput.select();
       navigator.clipboard.writeText(linkInput.value);
-      statusText.textContent = 'Link copiado para a área de transferência!';
+      statusText.textContent = 'Link copiado!';
     });
 
+    document.getElementById('wa-btn').addEventListener('click', () => {
+      const text = encodeURIComponent(`Baixe os arquivos que te enviei por este link (mantenha aberto até terminar): ${currentShareUrl}`);
+      window.open(`https://wa.me/?text=${text}`, '_blank');
+    });
+
+    if (navigator.share) {
+      const nativeBtn = document.getElementById('native-share-btn');
+      nativeBtn.style.display = 'block';
+      nativeBtn.addEventListener('click', () => {
+        navigator.share({
+          title: 'Transferência de Arquivos',
+          text: 'Clique no link para baixar os arquivos:',
+          url: currentShareUrl
+        });
+      });
+    }
+
+    // Conexão P2P
     peer.on('connection', (conn) => {
       conn.on('data', (data) => {
         if (data.type === 'ready' && payloadToSend) {
